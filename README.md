@@ -8,10 +8,11 @@ This is an upgraded version of the LAC 5.2 Conf-Offer / Conf-Mgmt samples:
 To install:
 1. Stop LAC
 1. In the <LAC-install>/CALiveAPICreator folder:
-  1.1. Rename ConfManagement folder (e.g., add a Z)
-  1.1 Copy the ConfManagement from the zip
+    1. Rename ConfManagement folder (e.g., add a Z)
+    1. Copy the ConfManagement from the zip
 1. Restart LAC
 1. Rename the existing Conference Offers / Conference Management APIs (use the API Properties > Details URL Fragment (again, just add a Z)
 1. Import the 2 json projects
   
   
+The Learning Center doc, of course, will be out of date.  The zip contains an updated image.
