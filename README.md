@@ -11,8 +11,11 @@ To install:
     1. Rename ConfManagement folder (e.g., add a Z)
     1. Copy the ConfManagement from the zip
 1. Restart LAC
-1. Rename the existing Conference Offers / Conference Management APIs (use the API Properties > Details URL Fragment (again, just add a Z)
+1. Rename the existing Conference Offers / Conference Management APIs
+    * use the API Properties > Details URL Fragment screen
+    * again, just add a Z
 1. Import the 2 json projects
+    * as for the initial LAC install, you must activate and restart the Connections
   
   
 The Learning Center doc, of course, will be out of date.  The zip contains an updated image.
