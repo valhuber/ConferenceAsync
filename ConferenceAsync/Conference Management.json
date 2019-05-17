@@ -1,0 +1,620 @@
+{
+  "{f}api.json": {
+    "name": "Conference Management",
+    "urlFragment": "conf-management",
+    "comments": "Illustrates message handling (works with Conference Offers).\nAccepts Approved Conference Offers; Enable Manage > Listeners > Connections; see Rules > Process Messages topic.\n\nNote: uses public broker, not allowed in some corporate networks).\n\nOn a Mac, you may wish to test locally; start MQTT like this:\n/usr/local/sbin/mosquitto -c /usr/local/etc/mosquitto/mosquitto.conf\n\nand consider MQTTBox for monitoring messages.",
+    "isEnabled": true,
+    "authProviderName": "Built-in authentication"
+  },
+  "{f}ReadMe.md": "# API\nThis folder contains the content of your API definition.\nName: Conference Management\nURL Fragment: conf-management\nComments: Illustrates message handling (works with Conference Offers).\nAccepts Approved Conference Offers; Enable Manage > Listeners > Connections; see Rules > Process Messages topic.\n\nNote: uses public broker, not allowed in some corporate networks).\n\nOn a Mac, you may wish to test locally; start MQTT like this:\n/usr/local/sbin/mosquitto -c /usr/local/etc/mosquitto/mosquitto.conf\n\nand consider MQTTBox for monitoring messages.\n",
+  "{f}exportoptions.json": {
+    "passwordStyle": "PLAINTEXT",
+    "apiOptionStyle": "SKIP_DEFAULT",
+    "authTokenStyle": "SKIP_AUTO",
+    "skipUrlFragmentWrapping": true,
+    "libraryStyle": "EMIT_ALL",
+    "schemaCacheStyle": "DO_NOT_EMIT"
+  },
+  "{f}apioptions.json": {
+    "Permit Authorization parameter in URL": {
+      "dataType": "boolean",
+      "value": true,
+      "defaultValue": false
+    },
+    "Tech docs URL": {
+      "dataType": "string",
+      "value": "https://docops.ca.com/ca-live-api-creator/5-1/en/tutorial/northwind",
+      "defaultValue": null
+    }
+  },
+  "{d}connections": {
+    "{f}ReadMe.md": "# CONNECTIONS\nThis folder contains definitions for connections.\n",
+    "{f}ManagementConnection.json": {
+      "name": "ManagementConnection",
+      "isActive": false,
+      "description": "MQTT connection used to subscribe to messages published from the Marketing API.",
+      "providerName": "MQTT",
+      "parameters": {
+        "automaticReconnect": {
+          "name": "automaticReconnect",
+          "value": "true",
+          "comments": null,
+          "kind": null
+        },
+        "broker": {
+          "name": "broker",
+          "value": "tcp://iot.eclipse.org:1883",
+          "comments": "local might be tcp://localhost:1883\n\nremote might be tcp://iot.eclipse.org:1883",
+          "kind": null
+        },
+        "clientId": {
+          "name": "clientId",
+          "value": "RANDOM",
+          "comments": null,
+          "kind": null
+        },
+        "keepAliveInterval": {
+          "name": "keepAliveInterval",
+          "value": "30",
+          "comments": null,
+          "kind": null
+        }
+      }
+    }
+  },
+  "{d}listeners": {
+    "{f}ReadMe.md": "# LISTENERS\nThis folder contains definitions for listeners.\n",
+    "{f}ConfManagementStartup.json": {
+      "name": "ConfManagementStartup",
+      "isActive": true,
+      "loggingLevel": "Warning",
+      "isSingleServer": true,
+      "description": null,
+      "connectionName": null,
+      "providerName": "Startup",
+      "parameters": null
+    },
+    "{f}ConfManagementStartup.js": "var teamSpaceName = listenerUtil.getTeamSpaceInfo().urlFragment;\n\nvar title = \"conf-management Startup [teamspace: \" + teamSpaceName + \"]: \";\n\nMktStart = {};  // scope our functions\n\n/* When the API in started, this code runs to load outboard strings such as urls, http headers etc.\n * We load from a property file (<teamSpaceName>.Properties) into ConfManagementLib's Config (a data structure in our library).\n *   You might use teamspaces for dev vs. production, with different propery files for each.\n * API.Properties goes into your LAC folder (where the Derby DBs are - Finance, Marketing, MktConfOffers etc):\n *\n * #<teamSpaceName> Properties\n * authHeader={ \"headers\": {\"Authorization\" : \"CALiveAPICreator AcctgToken:1\"} }\n * resourceURL=http://localhost:8080/rest/default/conf-management/v1\n * loadResourcesFromTable=true\n * resourcesToAudit={\"ProcessCharges\": true, \"DummyResourceName\": true}\n */\n\n// read the properties file, return props\nMktStart.readAPIProperties = function readAPIProperties(aPropFileName) {\n    var response = {};\n    var prop;\n    try {\n        prop = java.util.Optional.of(new java.util.Properties()).map(function (p) {\n            p.load(new java.io.FileInputStream(aPropFileName)); return p;}\n        ).get();\n\n        var propEnum = prop.propertyNames();\n        while (propEnum.hasMoreElements()) {  // you could make these per-API\n            var propName = propEnum.nextElement();\n            var propValue = prop.getProperty(propName); //  + \"\";\n            // print(title + \"......each prop: \" + propName + \" = \" + propValue);\n            if (propValue.startsWith(\"{\")) {\n                response[propName] = JSON.parse(propValue);\n            }\n            else {\n                response[propName] = propValue;\n            }\n        }\n    }\n    catch (e) {\n        // print(title + \"** readAPIProperties - exception reading properties [\" + aPropFileName + \"]: \" + e);\n        return null;\n    }\n\n    // print (title + \"..readAPIProperties from file [\" + propFileName + \"] returns -->\\n\" + JSON.stringify(response));\n    return response;\n};\n\n// table-driven technique so response event can be generic code\nMktStart.loadResourcesToAudit = function loadResourcesToAudit(aConfig) {\n    var result = {\n        ProcessCharges: true,\n        DummyFromStub: true\n    };\n    var settings = aConfig.settings;\n    if (settings.loadResourcesFromTable === false) {\n        // print(title + \"-- resourcesToAudit stub, per aConfig.loadResource: \" + settings.loadResource);\n    }\n    else {\n        result={};\n        // print(title + \"..loadResourcesToAudit() using aConfig: \" + JSON.stringify(aConfig));\n        var sysResourceInfoRows = listenerUtil.restGet(\n                settings.resourceURL + \"/main:SysResourceInfo\", null, settings.authHeader);\n        // print(title + \"..sysResourceInfoRows\");\n        var sysResourceRows = JSON.parse(sysResourceInfoRows);\n        for (var i = 0 ; i < sysResourceRows.length ; i++) {\n            var eachSysResourceInfoRow = sysResourceRows[i];\n            var resourceName = eachSysResourceInfoRow.ResourceName;\n            result[resourceName] = true;\n            // print(title + \"  ..resourceName: \" + resourceName + \", in: \" + JSON.stringify(eachSysResourceInfoRow) + \"\\n\");\n        }\n    }\n\n    return result;\n};\n\n\n/*********************************************************\n * Execution begins here                                 *\n * Initialize ConfManagement (a library) Config.settings *\n *********************************************************/\n\nvar userDir = Java.type(\"java.lang.System\").getProperty(\"user.dir\");\nvar propFileName = teamSpaceName + \".properties\";\n// print(\"\\n\" + title + \"running... reading propFileName[\" + propFileName +  \"] in LAC default dir: \" + userDir);\n\nvar prepareConfig = {\n    createdOn: new Date(),\n    settings: {\n        loadedBy: \"conf-management default settings - no API.properties file in LAC Default dir: \" + userDir,\n        resourceURL: \"http://localhost:8080/rest/default/conf-management/v1\",\n        authHeader: {\n            'headers': {\n                'Authorization': 'CALiveAPICreator AcctgToken:1'\n            }\n        },\n        loadResourcesFromTable: true  // set false to bypass restGet for resource names to audit\n    }\n};\n\nvar props = MktStart.readAPIProperties(propFileName);\nif (props !== null) {\n    prepareConfig.settings = props;\n    prepareConfig.settings.loadedBy = teamSpaceName + \".properties file in \" + userDir;\n}\n\nprepareConfig.settings.resourcesToAudit = MktStart.loadResourcesToAudit(prepareConfig);\n// print(title + \"MktMgmtLib configuring MktStart.loadResourcesToAudit: \" + JSON.stringify(prepareConfig) + \"\\n\");\n\nConfig.save(prepareConfig.settings);\nprint(\"\\n\" + title + \"..initialization complete - Config -->\\n\" + JSON.stringify(Config) + \"\\n\\n\");\n\nprint(title + \"*********************************************************\");\nprint(title + \"LAC is started, and initialized\");\nprint(title + \"Start your Browser at http://localhost:8080/APICreator/#/\");\nprint(title + \"*********************************************************\");\n\n",
+    "{f}ProcessChargesListener.json": {
+      "name": "ProcessChargesListener",
+      "isActive": true,
+      "loggingLevel": "Fine",
+      "isSingleServer": true,
+      "description": "This listener is designed to ensure that message persisted (not lost), even if errors occur in message processing.\nSee the rules, and the Topic information.",
+      "connectionName": "ManagementConnection",
+      "providerName": "MQTT",
+      "parameters": {
+        "topic_name": {
+          "value": "ProcessChargesTopic",
+          "comments": null
+        }
+      }
+    },
+    "{f}ProcessChargesListener.js": "var title = \"conf-management Listener (1): \";\nprint(title + \"Payload Received\");\ntry {    // persist payload\n    var payload = {};\n    payload.msgContent = message.toString();\n    payload.ProcessedStatus = \"Initial Insert\";\n    payload.PostToResource = \"ProcessChargesResource\";\n    var postPayloadResponse = listenerUtil.restPost(Config.settings.resourceURL + \"/MessageAudits\",\n                                            {}, Config.settings.authHeader, JSON.stringify(payload));\n    print(title + \"Payload saved to MessageAudits for async processing, postPayloadResponse: \" + postPayloadResponse + \"\\n\\n\");\n} catch(e) {\n    print (title + \"post exception: \" + e);\n    throw title + \"post exception: \" + e;\n}\n"
+  },
+  "{d}custom_endpoints": {
+    "{f}ReadMe.md": "# CUSTOM_ENDPOINTS\nThis folder contains definitions for custom_endpoints.\n"
+  },
+  "{f}relationships.json": [
+    {
+      "parentEntity": "main:Charges",
+      "childEntity": "main:EventTalks",
+      "roleToParent": "Charges",
+      "roleToChild": "EventTalks_List",
+      "deleteRule": "Cascade",
+      "updateRule": "Cascade",
+      "parentColumns": [
+        "ident"
+      ],
+      "childColumns": [
+        "EventCosts_ident"
+      ]
+    },
+    {
+      "parentEntity": "main:MarketingPrograms",
+      "childEntity": "main:Charges",
+      "roleToParent": "MarketingProgram",
+      "roleToChild": "Charges_List",
+      "deleteRule": "No Action",
+      "updateRule": "No Action",
+      "parentColumns": [
+        "name"
+      ],
+      "childColumns": [
+        "MarketingProgramName"
+      ]
+    }
+  ],
+  "{d}data_sources": {
+    "{f}ReadMe.md": "# DATA SOURCES\nThis folder contains definitions for data sources.\n",
+    "{f}ConfManagement.json": {
+      "name": "ConfManagement",
+      "prefix": "main",
+      "title": null,
+      "databaseType": "DERBY",
+      "comments": "Created using Connect Wizard",
+      "isActive": true,
+      "isLogErrors": false,
+      "isSchemaEditable": true,
+      "isSupportBoolean": false,
+      "isReadOnly": false,
+      "useJNDIDataSource": false,
+      "url": "jdbc:derby:ConfManagement",
+      "catalog": null,
+      "schema": "\"ConfManagement\"",
+      "username": "\"ConfManagement\"",
+      "password": null,
+      "maximumConnections": 20,
+      "tableExcludes": null,
+      "tableIncludes": null,
+      "procedureExcludes": null,
+      "procedureIncludes": null,
+      "nonPersistentAttributes": {
+      },
+      "tableInfos": {
+        "MarketingPrograms": {
+          "virtualPrimaryKeyColumns": [
+            "name"
+          ],
+          "sequenceUsage": {
+          },
+          "extendedProperties": null
+        }
+      },
+      "viewInfos": {
+      },
+      "procedureInfos": {
+      }
+    }
+  },
+  "{d}filters": {
+    "{f}ReadMe.md": "# FILTERS\nThis folder contains definitions for filters.\n"
+  },
+  "{d}functions": {
+    "{f}ReadMe.md": "# FUNCTIONS\nThis folder contains definitions for functions.\n",
+    "{f}ProcessCharges.json": {
+      "name": "ProcessCharges",
+      "isActive": true,
+      "comments": "Creates MessageAudit row from JSON request, for insertion into ProcessChargesResource",
+      "returnType": "{\n  \"StatusCode\": 201\n}",
+      "extendedProperties": null,
+      "parameters": null,
+      "functionType": "apiLevel"
+    },
+    "{f}ProcessCharges.js": "var title = \"conf-management ProcessCharges Function (1): \";\nfunction db(aMsg) {\n    print(\"\\n\" + title + aMsg);\n    log.debug(title + aMsg);\n}\n\ndb(title + \"Payload Received\");\ntry {    // persist payload\n    var payload = {};\n    payload.msgContent = req.json; \n    db(\"Running, req.json: \" + req.json);\n    payload.ProcessedStatus = \"Initial Insert\";\n    payload.PostToResource = \"ProcessChargesResource\";\n    var postPayloadResponse = listenerUtil.restPost(Config.settings.resourceURL + \"/MessageAudits\",\n                                            {}, Config.settings.authHeader, JSON.stringify(payload));\n    db(title + \"Payload saved to MessageAudits for async processing, postPayloadResponse: \" + postPayloadResponse + \"\\n\\n\");\n    return JSON.parse(postPayloadResponse);\n} catch(e) {\n    db (title + \"post exception: \" + e);\n    throw title + \"post exception: \" + e;\n}\n",
+    "{f}RetryPayload.json": {
+      "name": "RetryPayload",
+      "isActive": true,
+      "comments": "Initiate error recovery retry, per Rules on MessageAudits.",
+      "returnType": "{\n  \"statusCode\": 201\n}",
+      "extendedProperties": null,
+      "parameters": null,
+      "functionType": "rowLevel",
+      "appliesTo": [
+        "main:MessageAudits"
+      ]
+    },
+    "{f}RetryPayload.js": "row.ProcessedStatus = \"processed: \" + new Date(); // set table row attribute; starts update retry processing\nlog.debug(\"conf-management Initiate Retry - (re) Process Payload (5)\");\nreturn {statusCode: 201};\n"
+  },
+  "{d}libraries": {
+    "{f}ReadMe.md": "# LIBRARIES\nThis folder contains definitions for libraries and whether they are used.\n",
+    "{f}SystemLibraryUsage.json": [
+    ],
+    "{f}ConfManagementLib-1.0.json": {
+      "name": "ConfManagementLib",
+      "version": "1.0",
+      "isUsedByProject": true,
+      "title": "ConfManagementLib",
+      "description": "This is a JavaScript library",
+      "groupName": "newlib",
+      "docsURL": null,
+      "referenceURL": null
+    },
+    "{f}ConfManagementLib-1.0.js": "var Config = {  // a common technique for name-spacing in JavaScipt\n    created: new Date(),\n    save: function save(aMkt) {\n        Config.settings = aMkt;\n        Config.modified = new Date();\n        // print(\"ConfManagementLib Config'd: \" + JSON.stringify(Config));\n    }\n};\n\nprint(\"\\nConfig loaded: \" + JSON.stringify(Config) + \"\\n\");\n"
+  },
+  "{d}request_events": {
+    "{f}ReadMe.md": "# REQUEST EVENTS\nThis folder contains definitions for request events.\n",
+    "{f}ProcessPayloadOnRequest.json": {
+      "name": "ProcessPayloadOnRequest",
+      "eventType": "request",
+      "comments": "Unused, but illustrates a technique for auditing Resource Requests, per Extended Properties.",
+      "isActive": false
+    },
+    "{f}ProcessPayloadOnRequest.js": "if (req.verb === 'POST') {\n    var title = \"conf-management - ProcessPayload Request Event (2): \";\n    var extProps = null;  // see resource Extended Properties: ProcessCharges\n    try {\n        extProps = SysUtility.getExtendedPropertiesFor(req.resourceName);\n    } catch(e) {\n        // occurs for non-resources, etc\n    }\n    if (extProps && 'object' === typeof extProps && ! Array.isArray(extProps) && extProps.hasOwnProperty('PersistTo') ) {  // ProcessCharges ExtProp: { \"PersistTo\": \"PersistCharges\"}\n        var persistToResponse = SysUtility.restPost(Config.settings.resourceURL + \"/\" + extProps.PersistTo, {}, Config.settings.authHeader, {msgContent: JSON.stringify(req.json)});\n        print(title + req.resourceName + \" was audited (per extProps) - persisting as separate transaction: \" + \"\\nurl: \" + Config.settings.resourceURL + \"/\" + extProps.PersistTo + \"\\npayload: \" + JSON.stringify({msgContent: req.json}));\n    }\n}\n",
+    "{f}ProcessPayloadOnRequestAltDesign.json": {
+      "name": "ProcessPayloadOnRequestAltDesign",
+      "eventType": "request",
+      "comments": "Instead of using Extended Properties to persist the payload, this uses data tables.\nThis can make such persistence more dynamic.",
+      "isActive": false
+    },
+    "{f}ProcessPayloadOnRequestAltDesign.js": "if (req.verb == 'GET') {\n  return;\n}\nvar title = \"conf-management - ProcessPayload Request Event (2): \";\n// print(title + \"Started, with Config: \" + JSON.stringify(Config) + \"/n\");\nif ( ! Config.hasOwnProperty('settings') ) {\n    print(title + \"no settings for dbTable - no action (eg., during startup listener, Config: \" +\n                JSON.stringify(Config));\n} else {\n    if (Config.settings.hasOwnProperty('resourcesToAudit') ) {\n        var resourceInfo = Config.settings.resourcesToAudit;\n        // print(title + \"checking for resource: \" + req.resourceName + \" in: \" + JSON.stringify(resourceInfo) + \", Config: \" + JSON.stringify(Config));\n        if (resourceInfo[req.resourceName] === true && req.verb.toString() == 'POST') {\n            var reqData = {};\n            reqData.msgContent = req.json;\n            print(title + \"is audited (per table) - persisting: \" + resourceInfo[req.resourceName] + \", payload: \" + req.json);\n            var functionURL = Config.settings.resourceURL + \"/PersistCharges\" ; // + id + \"/ProcessPayload\";\n            var persistPayloadResponse = SysUtility.restPost(functionURL, {}, Config.settings.authHeader, reqData);\n        } else {\n            // print(title + req.resourceName + \" **not** audited (per table\");\n        }\n    }\n}\n"
+  },
+  "{d}resources": {
+    "{f}ReadMe.md": "# RESOURCES\nThis folder contains definitions for resources.\n",
+    "{f}apiversions.json": {
+      "v1": {
+        "name": "v1",
+        "comments": null
+      }
+    },
+    "{d}v1": {
+      "{d}ProcessChargesResource": {
+        "{f}ProcessChargesResource.json": {
+          "name": "ProcessChargesResource",
+          "description": "Payload sample, created by Post, or MessageAudits Event:\n\n[\n  {\n    \"name\": \"App Economy World\",\n    \"ExhibitsCost\": null,\n    \"TalksCost\": null,\n    \"MarketingProgramName\": \"Agile\",\n    \"Talks_List\": [\n    ]\n  }\n]",
+          "siblingRank": 100,
+          "resourceType": "TableBased",
+          "prefix": "main",
+          "entity": "Charges",
+          "isCollection": true,
+          "isCombined": false,
+          "filter": null,
+          "order": null,
+          "useSchemaAttributes": false,
+          "attributes": [
+            {
+              "name": "name",
+              "attribute": "name",
+              "description": null,
+              "isKey": false
+            },
+            {
+              "name": "TalksCost",
+              "attribute": "Cost_Talks",
+              "description": null,
+              "isKey": false
+            },
+            {
+              "name": "ExhibitsCost",
+              "attribute": "Cost_Exhibits",
+              "description": null,
+              "isKey": false
+            },
+            {
+              "name": "ident",
+              "attribute": "SourceIdent",
+              "description": null,
+              "isKey": false
+            },
+            {
+              "name": "MarketingProgramName",
+              "attribute": "MarketingProgramName",
+              "description": null,
+              "isKey": false
+            }
+          ]
+        },
+        "{f}get_event.js": null,
+        "{f}put_post_event.js": null,
+        "{f}extended_properties.js": null,
+        "{d}Talks_List": {
+          "{f}Talks_List.json": {
+            "name": "Talks_List",
+            "description": null,
+            "siblingRank": 100,
+            "resourceType": "TableBased",
+            "prefix": "main",
+            "entity": "EventTalks",
+            "join": "\"EventCosts_ident\" = [\"ident\"]",
+            "isCollection": true,
+            "isCombined": false,
+            "filter": null,
+            "order": null,
+            "useSchemaAttributes": false,
+            "attributes": [
+              {
+                "name": "name",
+                "attribute": "name",
+                "description": null,
+                "isKey": false
+              },
+              {
+                "name": "Amount",
+                "attribute": "Total_Amount",
+                "description": null,
+                "isKey": false
+              },
+              {
+                "name": "ident",
+                "attribute": "SourceIdent",
+                "description": null,
+                "isKey": false
+              }
+            ]
+          },
+          "{f}get_event.js": null,
+          "{f}put_post_event.js": null,
+          "{f}extended_properties.js": null
+        }
+      }
+    }
+  },
+  "{d}rules": {
+    "{f}ReadMe.md": "# RULES\nThis folder contains definitions for rules.\n",
+    "{f}prefixes.json": {
+      "main": "main"
+    },
+    "{d}main": {
+      "{f}ReadMe.md": "# RULES\nThis folder contains rules for entities in prefix main.\n",
+      "{d}Charges": {
+        "{f}validation_active_marketing_program.json": {
+          "name": "validation_active_marketing_program",
+          "entity": "Charges",
+          "isActive": true,
+          "ruleType": "validation",
+          "codeType": "JavaScript",
+          "errorMessage": "Sorry, changes must be assigned to a Marketing Program, and that program must be active",
+          "problemAttributes": [
+          ],
+          "isAutoTitle": false,
+          "title": "Active Marketing Program",
+          "comments": null,
+          "topics": [
+            "Error Handling"
+          ]
+        },
+        "{f}validation_active_marketing_program.js": "var marketingProgram = row.MarketingProgram;\nreturn ( logicContext.getVerb() == \"DELETE\" || (marketingProgram !== null && marketingProgram.IsActive === true));\n"
+      },
+      "{d}MessageAudits": {
+        "{f}event_async_process.json": {
+          "name": "event_async_process",
+          "entity": "MessageAudits",
+          "isActive": true,
+          "ruleType": "event",
+          "asynchronous": true,
+          "appliesTo": {
+            "insert": true,
+            "update": true,
+            "delete": true
+          },
+          "codeType": "JavaScript",
+          "isAutoTitle": false,
+          "title": "Process Payload to underlying tables - Async",
+          "comments": "Initial message (or API ProcessPayload - see Functions) simply creates a MessageAudits row, with msgContent (JSON or XML), and PostToResource. \n\nThis *asynchronous* event posts the msgContent to row.PostToResource (here, ProcessChargesResource), which provides mapping and transformation services, and processing of the data into the database (Charges, Talks).\n\nAsync events fire after the current transaction, so you can provide quick response while performing lengthy processing in background thread.\nFor async events, avoid SysUtility.getResource, oldRow and logicContext references.",
+          "topics": [
+            "Process Message"
+          ]
+        },
+        "{f}event_async_process.js": "// built using Examples (Persist Payload) and Control-Space\nvar title = \"conf-management Async Process Payload (6): \";\nfunction db(aMsg) {\n    print(\"\\n\" + title + aMsg);\n    log.debug(title + aMsg);\n}\n\nvar isInsert = false;\nif (typeof oldRow === 'undefined')\n    isInsert = true;\ndb(\"Running.   row.ProcessedStatus: \" + row.ProcessedStatus + \", isInsert: \" + isInsert);\nif (isInsert || row.ProcessedStatus !== oldRow.ProcessedStatus) {\n    db (\"Posting to: \" + row.PostToResource + \", with Config: \" + JSON.stringify(Config));\n    var resourceURL = req.localFullBaseURL + row.PostToResource;    // eg, ProcessChargesResource - mapping and transformation defined by Custom Resource\n    if (row.msgContent.startsWith(\"<\"))\n        settings.headers[\"Content-Type\"] = \"application/xml\";       // not required if strictly JSON\n    var postResponse = SysUtility.restPost(resourceURL, {}, Config.settings.authHeader, row.msgContent);\n    db(title + \"Post Response: \" + postResponse);\n} else {\n    db(\"not saving\");\n}\n",
+        "{f}formula_Alerts_datetime.json": {
+          "name": "formula_Alerts_datetime",
+          "entity": "MessageAudits",
+          "isActive": true,
+          "ruleType": "formula",
+          "attribute": "Alerts_datetime",
+          "codeType": "JavaScript",
+          "isJIT": false,
+          "isAutoTitle": false,
+          "title": "TimeStamp (insert)",
+          "comments": null,
+          "topics": [
+          ]
+        },
+        "{f}formula_Alerts_datetime.js": "print(\"MessageAudits Timestamp: \");\nif (row.Alerts_datetime === null) {\n    return new Date();\n}\nelse {\n    return row.Alerts_datetime;\n}\n"
+      }
+    }
+  },
+  "{d}security": {
+    "{f}ReadMe.md": "# SECURITY\nThis folder contains definitions for security.\n",
+    "{d}roles": {
+      "{f}ReadMe.md": "# ROLES\nThis contains Roles defined for the project.\nRoles define which server features are available and what the permissions\non each feature is enabled.\n",
+      "{f}API$0020Documentation.json": {
+        "name": "API Documentation",
+        "description": "This role is special and is used when generating OpenAPI(Swagger) documentation. It is recognized by the name special name 'API Documentation' and used only for documentation calls.\n Any Resources, Tables, Views, Procedures etc. that are defined and enabled by this role are used to generate the OpenAPI(Swagger) documentation.\n If this role is assigned to a user it will NOT be used for execution permissions.\n If this role is removed or otherwise unavailable, the Swagger/OpenAPI documentation will be nothing more that a name and version.",
+        "defaultTablePermission": "A",
+        "defaultViewPermission": "A",
+        "defaultFunctionPermission": "X",
+        "globals": [
+        ],
+        "apiVisibility": {
+          "table": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "view": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "resource": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "procedure": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "metatable": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "function": {
+            "isRestricted": false,
+            "restrictedTo": null
+          }
+        },
+        "entityPermission": {
+        },
+        "functionPermission": {
+        }
+      },
+      "{f}Full$0020access.json": {
+        "name": "Full access",
+        "description": "Full access to everything in this project",
+        "defaultTablePermission": "A",
+        "defaultViewPermission": "A",
+        "defaultFunctionPermission": "X",
+        "globals": [
+        ],
+        "apiVisibility": {
+          "table": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "view": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "resource": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "procedure": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "metatable": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "function": {
+            "isRestricted": false,
+            "restrictedTo": null
+          }
+        },
+        "entityPermission": {
+        },
+        "functionPermission": {
+        }
+      },
+      "{f}Read$0020only.json": {
+        "name": "Read only",
+        "description": "Read-only access to everything in this project",
+        "defaultTablePermission": "R",
+        "defaultViewPermission": "R",
+        "defaultFunctionPermission": "N",
+        "globals": [
+        ],
+        "apiVisibility": {
+          "table": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "view": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "resource": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "procedure": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "metatable": {
+            "isRestricted": false,
+            "restrictedTo": null
+          },
+          "function": {
+            "isRestricted": false,
+            "restrictedTo": null
+          }
+        },
+        "entityPermission": {
+        },
+        "functionPermission": {
+        }
+      }
+    },
+    "{d}authtokens": {
+      "{f}ReadMe.md": "# AUTHTOKENS\nThis contains statically defined API Keys (Auth Tokens) for this project.\nDynamically created keys (using @authentication service) are NOT exported.\n",
+      "{f}Acctg$0020Token.json": {
+        "name": "Acctg Token",
+        "authToken": "AcctgToken",
+        "description": "Created as part of this API. Feel free to change or delete this auth token.",
+        "userIdentifier": null,
+        "isActive": true,
+        "expiration": null,
+        "logging": "*=FINE",
+        "roles": [
+          "Full access"
+        ],
+        "globals": {
+        }
+      }
+    },
+    "{d}users": {
+      "{f}ReadMe.md": "# USERS\nThis contains Users defined for the system when using the default authentication provider.\nWhile this can be used for production systems, typically the authentication provider is LDAP\nor some other mechanism.\n",
+      "{f}admin.json": {
+        "name": "admin",
+        "fullname": "Admin user",
+        "email": "apideveloper@user.com",
+        "isActive": true,
+        "comments": null,
+        "keyLifetimeSeconds": 86400,
+        "passwordHash": "eoN6pnEvbWDidcmkYKaGuh8VboGM+ckzkS9ttN/D5UUgfsvmoVAURA1DKLT8GB5P76FZCF8ZRs7X1/lYOACKqQ==",
+        "passwordSalt": "N6XkerPwWMHQ8q8u8cvxxOTA1QH+e+DUhsVNBZEn",
+        "roles": [
+          "Full access"
+        ],
+        "globals": {
+        }
+      },
+      "{f}demo.json": {
+        "name": "demo",
+        "fullname": "Demo user",
+        "email": "apideveloper@user.com",
+        "isActive": true,
+        "comments": null,
+        "keyLifetimeSeconds": 86400,
+        "passwordHash": "qSK7O7py2laY7HEIYUTK3T8W5dFsCHOjuja5o5XiHKaUh4JWVp64AHr00KLdj3IvxvjJoyvLCwXf5WXW7yBnlA==",
+        "passwordSalt": "amrH809KmgOdRoQvwO4KUGAIMDHWmoGx63lX+5Rq",
+        "roles": [
+          "Full access"
+        ],
+        "globals": {
+        }
+      }
+    }
+  },
+  "{d}sorts": {
+    "{f}ReadMe.md": "# SORTS\nThis folder contains definitions for sorts.\n"
+  },
+  "{d}timers": {
+    "{f}ReadMe.md": "# TIMERS\nThis folder contains definitions for timers.\n"
+  },
+  "{d}topics": {
+    "{f}ReadMe.md": "# TOPICS\nThis folder contains definitions for topics.\n",
+    "{f}Error$0020Handling.json": {
+      "name": "Error Handling",
+      "color": "#fdf88c",
+      "summary": "Enable Error Correction"
+    },
+    "{f}Error$0020Handling.html": "<p>With&nbsp;<code>MessageAudit&nbsp;</code>With&nbsp;persisted even when errors occur, we can come back later and check the error handling.</p>\n\n<p>To test this</p>\n\n<ol>\n\t<li>Set the MarketingProgram&#39;s isActive to false</li>\n\t<li>In MktConf, Approve a Marketing Conference.\n\t<ol>\n\t\t<li>You should not see the Charges data.</li>\n\t</ol>\n\t</li>\n\t<li>Set the MarketingProgram&#39;s isActive to true</li>\n\t<li>Alter the MessageAudit ProcessedFlag, and save.&nbsp;\n\t<ol>\n\t\t<li>You should see the Charges data appear.</li>\n\t</ol>\n\t</li>\n</ol>\n",
+    "{f}Process$0020Message.json": {
+      "name": "Process Message",
+      "color": "#f7b8d9",
+      "summary": "Process Message: save Charges and Talks data."
+    },
+    "{f}Process$0020Message.html": "<h2>1. <tt>ProcessChargesListener</tt> - creates <tt>MessageAudits</tt> row</h2>\n\n<p>See the listener <tt>ProcessChargesListener</tt> (topic&nbsp;ProcessChargesTopic).</p>\n\n<p>It POSTs&nbsp;a <tt>MessageAudits</tt> row, setting attributes&nbsp;<tt>msgContent</tt>&nbsp;(the JSON/XML Payload) and <tt>PostToResource</tt>.</p>\n\n<h3>&nbsp; &nbsp; &nbsp; 1.1 <tt>ProcessCharges</tt> Function</h3>\n\n<p>&nbsp; &nbsp; &nbsp; &nbsp;Instead or in addition, you can create a function that does the same thing.</p>\n\n<p>&nbsp;</p>\n\n<h2>2. <tt>ProcessChargesResource</tt> - mapping and transformation, logic and persistence</h2>\n\n<p>This resource does the processing to map and transform the incoming request data to match our schema, and persists the data into the <tt>Charges</tt> and <tt>Talks</tt> tables, including running any of their logic (none in this simplified example).</p>\n\n<p>&nbsp;</p>\n\n<h2>3. <tt>MessageAudits</tt> Event:&nbsp;<tt>Process Payload to underlying tables - Async</tt></h2>\n\n<p>This <em>asynchronous</em>&nbsp;event posts &nbsp;<tt>row.msgContent</tt>&nbsp;data to <tt>row.PostToResource</tt> (here, <tt>ProcessChargesResource</tt>), which provides mapping and transformation services, and processing of the data into the database&nbsp;as described above</p>\n\n<p>Async events fire after the current transaction, so you can provide quick response while performing lengthy processing in background thread.<br />\nFor async events, avoid SysUtility.getResource, oldRow and logicContext references.</p>\n"
+  },
+  "{d}applications": {
+    "{f}ReadMe.md": "# APPLICATIONS\nThis folder contains definitions for applications.\n",
+    "{d}options": {
+      "{f}ReadMe.md": "# APPLICATION OPTIONS\nThis folder contains definitions for application options.\n"
+    },
+    "{d}skins": {
+      "{f}ReadMe.md": "# APPLICATION SKINS\nThis folder contains definitions for application skins.\n"
+    },
+    "{d}settings": {
+      "{f}ReadMe.md": "# APPLICATION SETTINGS\nThis folder contains definitions for application settings.\n",
+      "{f}main$003aMessageAudits.json": {
+        "tableName": "main:MessageAudits",
+        "state": "eyJuYW1lIjoibWFpbjpNZXNzYWdlQXVkaXRzIiwiYWxpYXMiOiJtYWluOk1lc3NhZ2VBdWRpdHMiLCJjb2x1bW5Gb3JtYXRzIjp7ImlkQWxlcnRzIjp7Im5hbWUiOiJpZEFsZXJ0cyIsImFsaWFzIjoiSWQgQWxlcnRzIiwidHlwZSI6IklOVEVHRVIiLCJnZW5lcmljX3R5cGUiOiJudW1iZXIiLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOmZhbHNlLCJtYXNrIjpudWxsLCJtYXNrVHlwZSI6Im51bWJlciIsImJpbmFyeVR5cGUiOm51bGwsImV4dGVuc2lvblR5cGUiOm51bGwsImV2YWwiOltdLCJkYXRhU291cmNlIjoiaWRBbGVydHMiLCIkJGhhc2hLZXkiOiIxMzUifSwibXNnQ29udGVudCI6eyJuYW1lIjoibXNnQ29udGVudCIsImFsaWFzIjoiTXNnIENvbnRlbnQiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6Im1zZ0NvbnRlbnQiLCJ3aWR0aCI6NDU0LjY2NjY2NjY2NjY2NjYzfSwiQWxlcnRzX2RhdGV0aW1lIjp7Im5hbWUiOiJBbGVydHNfZGF0ZXRpbWUiLCJhbGlhcyI6IkFsZXJ0cyBEYXRldGltZSIsInR5cGUiOiJUSU1FU1RBTVAiLCJnZW5lcmljX3R5cGUiOiJ0aW1lc3RhbXAgd2l0aCB0aW1lIHpvbmUiLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOnRydWUsIm1hc2siOm51bGwsIm1hc2tUeXBlIjoidGltZXN0YW1wIHdpdGggdGltZSB6b25lIiwiYmluYXJ5VHlwZSI6bnVsbCwiZXh0ZW5zaW9uVHlwZSI6bnVsbCwiZXZhbCI6W10sImRhdGFTb3VyY2UiOiJBbGVydHNfZGF0ZXRpbWUiLCJ3aWR0aCI6MjI3LjMzMzMzMzMzMzMzMzMxLCIkJGhhc2hLZXkiOiIxMzQifSwiUHJvY2Vzc2VkU3RhdHVzIjp7Im5hbWUiOiJQcm9jZXNzZWRTdGF0dXMiLCJhbGlhcyI6IlByb2Nlc3NlZCBTdGF0dXMiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6IlByb2Nlc3NlZFN0YXR1cyIsIiQkaGFzaEtleSI6IjEzMyJ9LCJQb3N0VG9SZXNvdXJjZSI6eyJuYW1lIjoiUG9zdFRvUmVzb3VyY2UiLCJhbGlhcyI6IlBvc3QgVG8gUmVzb3VyY2UiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6IlBvc3RUb1Jlc291cmNlIn19LCJncmlkQ29sdW1ucyI6eyJtc2dDb250ZW50Ijp7Im5hbWUiOiJtc2dDb250ZW50IiwiYWxpYXMiOiJNc2cgQ29udGVudCIsInR5cGUiOiJWQVJDSEFSIiwiZ2VuZXJpY190eXBlIjoic3RyaW5nIiwiaXNfZWRpdGFibGUiOnRydWUsImlzX251bGxhYmxlIjp0cnVlLCJtYXNrIjpudWxsLCJtYXNrVHlwZSI6InN0cmluZyIsImJpbmFyeVR5cGUiOm51bGwsImV4dGVuc2lvblR5cGUiOm51bGwsImV2YWwiOltdLCJkYXRhU291cmNlIjoibXNnQ29udGVudCIsIndpZHRoIjozMzMuMzMzMzMzMzMzMzMzMywiJCRoYXNoS2V5IjoiNUhDIn0sIkFsZXJ0c19kYXRldGltZSI6eyJuYW1lIjoiQWxlcnRzX2RhdGV0aW1lIiwiYWxpYXMiOiJBbGVydHMgRGF0ZXRpbWUiLCJ0eXBlIjoiVElNRVNUQU1QIiwiZ2VuZXJpY190eXBlIjoidGltZXN0YW1wIHdpdGggdGltZSB6b25lIiwiaXNfZWRpdGFibGUiOnRydWUsImlzX251bGxhYmxlIjp0cnVlLCJtYXNrIjpudWxsLCJtYXNrVHlwZSI6InRpbWVzdGFtcCB3aXRoIHRpbWUgem9uZSIsImJpbmFyeVR5cGUiOm51bGwsImV4dGVuc2lvblR5cGUiOm51bGwsImV2YWwiOltdLCJkYXRhU291cmNlIjoiQWxlcnRzX2RhdGV0aW1lIiwid2lkdGgiOjE2Ni42NjY2NjY2NjY2NjY2Nn19LCJzY2FsYXJDb2x1bW5zIjp7ImlkQWxlcnRzIjp7Im5hbWUiOiJpZEFsZXJ0cyIsImFsaWFzIjoiSWQgQWxlcnRzIiwidHlwZSI6IklOVEVHRVIiLCJnZW5lcmljX3R5cGUiOiJudW1iZXIiLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOmZhbHNlLCJtYXNrIjpudWxsLCJtYXNrVHlwZSI6Im51bWJlciIsImJpbmFyeVR5cGUiOm51bGwsImV4dGVuc2lvblR5cGUiOm51bGwsImV2YWwiOltdLCJkYXRhU291cmNlIjoiaWRBbGVydHMiLCIkJGhhc2hLZXkiOiIxMzUifSwibXNnQ29udGVudCI6eyJuYW1lIjoibXNnQ29udGVudCIsImFsaWFzIjoiTXNnIENvbnRlbnQiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6Im1zZ0NvbnRlbnQiLCJ3aWR0aCI6NDU0LjY2NjY2NjY2NjY2NjYzfSwiQWxlcnRzX2RhdGV0aW1lIjp7Im5hbWUiOiJBbGVydHNfZGF0ZXRpbWUiLCJhbGlhcyI6IkFsZXJ0cyBEYXRldGltZSIsInR5cGUiOiJUSU1FU1RBTVAiLCJnZW5lcmljX3R5cGUiOiJ0aW1lc3RhbXAgd2l0aCB0aW1lIHpvbmUiLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOnRydWUsIm1hc2siOm51bGwsIm1hc2tUeXBlIjoidGltZXN0YW1wIHdpdGggdGltZSB6b25lIiwiYmluYXJ5VHlwZSI6bnVsbCwiZXh0ZW5zaW9uVHlwZSI6bnVsbCwiZXZhbCI6W10sImRhdGFTb3VyY2UiOiJBbGVydHNfZGF0ZXRpbWUiLCJ3aWR0aCI6MjI3LjMzMzMzMzMzMzMzMzMxLCIkJGhhc2hLZXkiOiIxMzQifSwiUHJvY2Vzc2VkU3RhdHVzIjp7Im5hbWUiOiJQcm9jZXNzZWRTdGF0dXMiLCJhbGlhcyI6IlByb2Nlc3NlZCBTdGF0dXMiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6IlByb2Nlc3NlZFN0YXR1cyIsIiQkaGFzaEtleSI6IjEzMyJ9LCJQb3N0VG9SZXNvdXJjZSI6eyJuYW1lIjoiUG9zdFRvUmVzb3VyY2UiLCJhbGlhcyI6IlBvc3QgVG8gUmVzb3VyY2UiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6IlBvc3RUb1Jlc291cmNlIn19LCJwYXJlbnRTZXR0aW5ncyI6e30sImRlZmF1bHRUYWJsZSI6Im1haW46TWVzc2FnZUF1ZGl0cyIsIndpbmRvd3MiOlsibWFpbiIsImNoaWxkIiwiZm9ybSJdLCJjaGlsZHJlblNldHRpbmdzIjp7fSwiZ3JvdXBzIjpbeyJ0aXRsZSI6IlBheWxvYWQgSW5mbyIsImNvbHVtbnMiOlsibXNnQ29udGVudCIsIlBvc3RUb1Jlc291cmNlIl0sIiQkaGFzaEtleSI6IjIwOSJ9LHsidGl0bGUiOiJBZG1pbiBJbmZvIiwiY29sdW1ucyI6WyJQcm9jZXNzZWRTdGF0dXMiLCJBbGVydHNfZGF0ZXRpbWUiLCJpZEFsZXJ0cyJdLCIkJGhhc2hLZXkiOiIwOEEifV0sImxhYmVsUGxhY2VtZW50IjoiVG9wIiwiZXhwcmVzc2VkVGl0bGUiOiJcIk1lc3NhZ2UgQXVkaXQgUGF5bG9hZCwgcHJvY2Vzc2VkIGF0OiBcIiArIHJvdy5BbGVydHNfZGF0ZXRpbWUiLCJkZXNjcmlwdGlvbiI6IjxoMT5EZXNpZ24gR29hbDwvaDE+PHA+VGhpcyB0YWJsZSBwZXJzaXN0cyB0aGUgbWVzc2FnZSwgaW4gYSBzZXBhcmF0ZSB0cmFuc2FjdGlvbiBmcm9tIHByb2Nlc3NpbmcuwqAgVGhhdCBlbmFibGVzIHlvdSB0byBjb3JyZWN0IGVycm9ycyBhbmQgcmV0cnkuPC9wPjxoMT5UZXN0IGl0PC9oMT48cD5DaGFuZ2luZyB0aGUgUHJvY2Vzc2VkU3RhdHVzIHJ1bnMgdGhlIGV2ZW50IHRvIFByb2Nlc3NDaGFyZ2VzIChwZXJzaXN0IHRvIENoYXJnZXMgYW5kIFRhbGtzKSwgb3IgaW5zZXJ0IHRoaXM6PC9wPjxwPlsgIHsgICAgJiMzNDtuYW1lJiMzNDs6ICYjMzQ7QXBwIEVjb25vbXkgV29ybGQmIzM0OywgICAgJiMzNDtFeGhpYml0c0Nvc3QmIzM0OzogbnVsbCwgICAgJiMzNDtUYWxrc0Nvc3QmIzM0OzogbnVsbCwgICAgJiMzNDtNYXJrZXRpbmdQcm9ncmFtTmFtZSYjMzQ7OiAmIzM0O0FnaWxlJiMzNDssICAgICYjMzQ7QG1ldGFkYXRhJiMzNDs6IHsgICAgICAmIzM0O2hyZWYmIzM0OzogJiMzNDtodHRwOi8vbG9jYWxob3N0OjgwODAvcmVzdC9kZWZhdWx0L2NvbmYtb2ZmZXIvdjEvTWFuYWdlbWVudEFsZXJ0LzEmIzM0OywgICAgICAmIzM0O2NoZWNrc3VtJiMzNDs6ICYjMzQ7QTowZjQxM2Q0MmMzYzEyYzYzJiMzNDsgICAgfSwgICAgJiMzNDtUYWxrc19MaXN0JiMzNDs6IFsgICAgXSAgfV08L3A+In0=",
+        "objectType": "table"
+      },
+      "{f}main$003aSysResourceInfo.json": {
+        "tableName": "main:SysResourceInfo",
+        "state": "eyJuYW1lIjoibWFpbjpTeXNSZXNvdXJjZUluZm8iLCJhbGlhcyI6Im1haW46U3lzUmVzb3VyY2VJbmZvIiwiY29sdW1uRm9ybWF0cyI6eyJpZGVudCI6eyJuYW1lIjoiaWRlbnQiLCJhbGlhcyI6IklkZW50IiwidHlwZSI6IklOVEVHRVIiLCJnZW5lcmljX3R5cGUiOiJudW1iZXIiLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOmZhbHNlLCJtYXNrIjpudWxsLCJtYXNrVHlwZSI6Im51bWJlciIsImJpbmFyeVR5cGUiOm51bGwsImV4dGVuc2lvblR5cGUiOm51bGwsImV2YWwiOltdLCJkYXRhU291cmNlIjoiaWRlbnQiLCJ3aWR0aCI6MTUyLjgsIiQkaGFzaEtleSI6IjFaUiJ9LCJuYW1lIjp7Im5hbWUiOiJuYW1lIiwiYWxpYXMiOiJOYW1lIiwidHlwZSI6IlZBUkNIQVIiLCJnZW5lcmljX3R5cGUiOiJzdHJpbmciLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOnRydWUsIm1hc2siOm51bGwsIm1hc2tUeXBlIjoic3RyaW5nIiwiYmluYXJ5VHlwZSI6bnVsbCwiZXh0ZW5zaW9uVHlwZSI6bnVsbCwiZXZhbCI6W10sImRhdGFTb3VyY2UiOiJuYW1lIiwid2lkdGgiOjYxMS4yLCIkJGhhc2hLZXkiOiIxWlAifSwiUmVzb3VyY2VOYW1lIjp7Im5hbWUiOiJSZXNvdXJjZU5hbWUiLCJhbGlhcyI6IlJlc291cmNlIE5hbWUiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6IlJlc291cmNlTmFtZSIsIiQkaGFzaEtleSI6IjFaUSJ9fSwiZ3JpZENvbHVtbnMiOnsiaWRlbnQiOnsibmFtZSI6ImlkZW50IiwiYWxpYXMiOiJJZGVudCIsInR5cGUiOiJJTlRFR0VSIiwiZ2VuZXJpY190eXBlIjoibnVtYmVyIiwiaXNfZWRpdGFibGUiOnRydWUsImlzX251bGxhYmxlIjpmYWxzZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJudW1iZXIiLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6ImlkZW50Iiwid2lkdGgiOjEwMC4yOTE0MDg5MzQ3MDc5MiwiJCRoYXNoS2V5IjoiMUVIIn0sIm5hbWUiOnsibmFtZSI6Im5hbWUiLCJhbGlhcyI6Ik5hbWUiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6Im5hbWUiLCJ3aWR0aCI6NDAxLjE2NTYzNTczODgzMTY3LCIkJGhhc2hLZXkiOiIxRUkifSwiUmVzb3VyY2VOYW1lIjp7Im5hbWUiOiJSZXNvdXJjZU5hbWUiLCJhbGlhcyI6IlJlc291cmNlIE5hbWUiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6IlJlc291cmNlTmFtZSIsIndpZHRoIjoyNjIuNTQyOTU1MzI2NDYwNDZ9fSwic2NhbGFyQ29sdW1ucyI6eyJuYW1lIjp7Im5hbWUiOiJuYW1lIiwiYWxpYXMiOiJOYW1lIiwidHlwZSI6IlZBUkNIQVIiLCJnZW5lcmljX3R5cGUiOiJzdHJpbmciLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOnRydWUsIm1hc2siOm51bGwsIm1hc2tUeXBlIjoic3RyaW5nIiwiYmluYXJ5VHlwZSI6bnVsbCwiZXh0ZW5zaW9uVHlwZSI6bnVsbCwiZXZhbCI6W10sImRhdGFTb3VyY2UiOiJuYW1lIiwid2lkdGgiOjYxMS4yLCIkJGhhc2hLZXkiOiIxWlAifSwiUmVzb3VyY2VOYW1lIjp7Im5hbWUiOiJSZXNvdXJjZU5hbWUiLCJhbGlhcyI6IlJlc291cmNlIE5hbWUiLCJ0eXBlIjoiVkFSQ0hBUiIsImdlbmVyaWNfdHlwZSI6InN0cmluZyIsImlzX2VkaXRhYmxlIjp0cnVlLCJpc19udWxsYWJsZSI6dHJ1ZSwibWFzayI6bnVsbCwibWFza1R5cGUiOiJzdHJpbmciLCJiaW5hcnlUeXBlIjpudWxsLCJleHRlbnNpb25UeXBlIjpudWxsLCJldmFsIjpbXSwiZGF0YVNvdXJjZSI6IlJlc291cmNlTmFtZSIsIiQkaGFzaEtleSI6IjFaUSJ9LCJpZGVudCI6eyJuYW1lIjoiaWRlbnQiLCJhbGlhcyI6IklkZW50IiwidHlwZSI6IklOVEVHRVIiLCJnZW5lcmljX3R5cGUiOiJudW1iZXIiLCJpc19lZGl0YWJsZSI6dHJ1ZSwiaXNfbnVsbGFibGUiOmZhbHNlLCJtYXNrIjpudWxsLCJtYXNrVHlwZSI6Im51bWJlciIsImJpbmFyeVR5cGUiOm51bGwsImV4dGVuc2lvblR5cGUiOm51bGwsImV2YWwiOltdLCJkYXRhU291cmNlIjoiaWRlbnQiLCJ3aWR0aCI6MTUyLjgsIiQkaGFzaEtleSI6IjFaUiJ9fSwicGFyZW50U2V0dGluZ3MiOnt9LCJkZWZhdWx0VGFibGUiOmZhbHNlLCJ3aW5kb3dzIjpbIm1haW4iLCJjaGlsZCIsImZvcm0iXSwiY2hpbGRyZW5TZXR0aW5ncyI6e30sImdyb3VwcyI6W3sidGl0bGUiOiJTeXN0ZW0gSW5mb3JtYXRpb24gZm9yIEV4dGVuZGVkIFJlc291cmNlIFByb2Nlc3NpbmciLCJjb2x1bW5zIjpbIm5hbWUiLCJSZXNvdXJjZU5hbWUiLCJpZGVudCJdLCIkJGhhc2hLZXkiOiIxTFgifV0sImxhYmVsUGxhY2VtZW50IjoiVG9wIiwiZXhwcmVzc2VkVGl0bGUiOiInU3lzUmVzb3VyY2VJbmZvIGZvcjogJyArIHJvdy5SZXNvdXJjZU5hbWUiLCJkZXNjcmlwdGlvbiI6IjxoMT5TeXN0ZW0gQWRtaW4gRGF0YSB0byBUcmlnZ2VyIEF1ZGl0aW5nPC9oMT48cD5UaGlzIGluZm9ybWF0aW9uIGlzIHVzZWQgYnkgdGhlIFJlc3BvbnNlIEV2ZW50IHRvIGNvbnRyb2wgd2hpY2ggcmVzb3VyY2VzIGhhdmUgYWxsIHBvc3RzIHBlcnNpc3RlZCB0byB0aGUgTWVzc2FnZUF1ZGl0cyB0YWJsZS48L3A+PGgxPkVuYWJsZXMgQXVkaXRpbmcsIGFuZCBFcnJvciBDb3JyZWN0aW9uPC9oMT48cD5UaGlzIHByb3ZpZGVzIGZvciBtZXNzYWdlIGF1ZGl0aW5nLCBhbmQgZXJyb3IgY29ycmVjdGlvbi48L3A+In0=",
+        "objectType": "table"
+      }
+    },
+    "{f}application.json": {
+      "name": "Default app",
+      "language": "eng",
+      "description": null
+    }
+  },
+  "{f}issues.json": [
+  ]
+}
